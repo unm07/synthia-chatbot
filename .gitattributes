@@ -1,0 +1,2 @@
+path/to/your/large/file.mp4 filter=lfs diff=lfs merge=lfs -text
+clear filter=lfs diff=lfs merge=lfs -text
