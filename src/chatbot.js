@@ -1,18 +1,16 @@
 // chatbot.js
-import { useState,useEffect } from 'react';
-import { Configuration, OpenAIApi } from 'openai';
+import { useState, useEffect } from 'react';
 import React from 'react';
-import {db} from './firebase-config'
+import { db } from './firebase-config';
 import firebase from 'firebase/compat/app';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+// Initialize Gemini AI
+const genAI = new GoogleGenerativeAI(process.env.REACT_APP_GEMINI_API_KEY);
 
 const useChatbot = () => {
   const [chatHistory, setChatHistory] = useState([]);
-  const [isLoading, setIsLoading] = React.useState(false); 
-  const openAIConfig = new Configuration({
-  apiKey: process.env.REACT_APP_OPENAI_API_KEY,
-});
-
-  const openAI = new OpenAIApi(openAIConfig);
+  const [isLoading, setIsLoading] = React.useState(false);
 
   const sendMessage = async (userMessage) => {
     setIsLoading(true);
@@ -23,40 +21,53 @@ const useChatbot = () => {
       { role: 'user', content: userMessage },
       { role: 'assistant', content: 'Loading...' },
     ]);
+
     try {
-
-      const systemMessage = {
-        role: 'system',
-        content: 'You are a chatbot named Synthia. You are kind, friendly, and your task is to help people with day-to-day tasks.',
-      };
-
-      const response = await openAI.createChatCompletion({
-        model: 'gpt-3.5-turbo',
-        messages: [...chatHistory, systemMessage, { role: 'user', content: userMessage }],
+      // Generate response using Gemini AI
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const result = await model.generateContent({
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: userMessage,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          maxOutputTokens: 1000,
+          temperature: 0.1,
+        },
       });
+      
+      const assistantReply = result.response.text();
 
-      const assistantReply = response.data.choices[0].message.content;
-
+      // Update chat history with the assistant's reply
       setChatHistory((prevChat) => [
         ...prevChat.slice(0, -1),
         { role: 'assistant', content: assistantReply },
       ]);
-      const user=firebase.auth().currentUser;
-      if(user){
-        const userDoc=db.collection('users').doc(user.uid);
+
+      // Update Firestore with the new chat messages
+      const user = firebase.auth().currentUser;
+      if (user) {
+        const userDoc = db.collection('users').doc(user.uid);
         userDoc.update({
-          chats:firebase.firestore.FieldValue.arrayUnion(
+          chats: firebase.firestore.FieldValue.arrayUnion(
             { role: 'user', content: userMessage },
             { role: 'assistant', content: assistantReply }
           )
-        })
+        });
       }
-    }
-    catch (error) {
+    } catch (error) {
       console.error('Error sending message:', error);
+    } finally {
       setIsLoading(false);
     }
   };
+
   useEffect(() => {
     const user = firebase.auth().currentUser;
     if (user) {
@@ -64,7 +75,7 @@ const useChatbot = () => {
 
       const unsubscribe = userDoc.onSnapshot((doc) => {
         if (doc.exists) {
-          setChatHistory(doc.data().chats);
+          setChatHistory(doc.data().chats || []);
         }
       });
 
@@ -74,7 +85,5 @@ const useChatbot = () => {
 
   return [chatHistory, sendMessage, isLoading];
 };
-
-
 
 export default useChatbot;
